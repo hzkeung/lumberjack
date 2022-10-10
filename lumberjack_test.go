@@ -35,7 +35,7 @@ func TestNewFile(t *testing.T) {
 
 	dir := makeTempDir("TestNewFile", t)
 	defer os.RemoveAll(dir)
-	r, err := NewRoller(logFile(dir), 5, nil)
+	r, err := NewRoller(logFile(dir), &Options{MaxSize: 5})
 	isNil(err, t)
 	defer r.Close()
 	b := []byte("boo!")
@@ -57,7 +57,7 @@ func TestOpenExisting(t *testing.T) {
 	isNil(err, t)
 	existsWithContent(filename, data, t)
 
-	r, err := NewRoller(filename, 100, nil)
+	r, err := NewRoller(filename, &Options{MaxSize: 100})
 	isNil(err, t)
 	defer r.Close()
 	b := []byte("boo!")
@@ -76,7 +76,7 @@ func TestWriteTooLong(t *testing.T) {
 	currentTime = fakeTime
 	dir := makeTempDir("TestWriteTooLong", t)
 	defer os.RemoveAll(dir)
-	r, err := NewRoller(logFile(dir), 5, nil)
+	r, err := NewRoller(logFile(dir), &Options{MaxSize: 5})
 	isNil(err, t)
 	defer r.Close()
 	b := []byte("booooooooooooooo!")
@@ -93,7 +93,7 @@ func TestMakeLogDir(t *testing.T) {
 	dir := time.Now().Format("TestMakeLogDir" + backupTimeFormat)
 	dir = filepath.Join(os.TempDir(), dir)
 	defer os.RemoveAll(dir)
-	r, err := NewRoller(logFile(dir), 5, nil)
+	r, err := NewRoller(logFile(dir), &Options{MaxSize: 5})
 	isNil(err, t)
 	defer r.Close()
 	b := []byte("boo!")
@@ -105,7 +105,7 @@ func TestMakeLogDir(t *testing.T) {
 }
 
 func TestEmptyFilename(t *testing.T) {
-	_, err := NewRoller("", 100, nil)
+	_, err := NewRoller("", &Options{MaxSize: 100})
 	notNil(err, t)
 }
 
@@ -117,7 +117,7 @@ func TestAutoRotate(t *testing.T) {
 
 	filename := logFile(dir)
 
-	r, err := NewRoller(filename, 10, nil)
+	r, err := NewRoller(filename, &Options{MaxSize: 10})
 	isNil(err, t)
 	defer r.Close()
 	b := []byte("boo!")
@@ -146,6 +146,139 @@ func TestAutoRotate(t *testing.T) {
 
 }
 
+func TestTimeRotateDaily(t *testing.T) {
+	currentTime = fakeTime
+	b := []byte("boo!")
+	b2 := []byte("foooooo!")
+	t.Run("daily", func(t *testing.T) {
+		dir := makeTempDir("TestDateRotate", t)
+		defer os.RemoveAll(dir)
+		keepMaxDay := 2
+		filename := logFile(dir)
+		r, err := NewRoller(filename, &Options{
+			MaxAge:     time.Duration(keepMaxDay*24) * time.Hour, // keep 2 days
+			RotateType: RotateDaily,
+			LocalTime:  true,
+		})
+		isNil(err, t)
+		defer r.Close()
+		t.Run("now", func(t *testing.T) {
+			n, err := r.Write(b)
+			isNil(err, t)
+			equals(len(b), n, t)
+			existsWithContent(filename, b, t)
+			fileCount(dir, 1, t)
+		})
+		t.Run("1 day later", func(t *testing.T) {
+			newFakeTime(24 * time.Hour)
+			n, err := r.Write(b2)
+			isNil(err, t)
+			equals(len(b2), n, t)
+			existsWithContent(filename, b2, t)
+			fileCount(dir, 2, t)
+			existsWithContent(backupFile(dir, true), b, t)
+		})
+		t.Run("check backup files", func(t *testing.T) {
+			t.Run("2 day later", func(t *testing.T) {
+				newFakeTime(24 * time.Hour)
+				n, err := r.Write(b2)
+				isNil(err, t)
+				equals(len(b2), n, t)
+				existsWithContent(filename, b2, t)
+				// we need to wait a little bit since the files get deleted on a different
+				// goroutine.
+				<-time.After(time.Millisecond * 100)
+				fileCount(dir, 2+1, t)
+			})
+			t.Run("3 day later", func(t *testing.T) {
+				newFakeTime(24 * time.Hour)
+				n, err := r.Write(b2)
+				isNil(err, t)
+				equals(len(b2), n, t)
+				existsWithContent(filename, b2, t)
+				// we need to wait a little bit since the files get deleted on a different
+				// goroutine.
+				<-time.After(time.Millisecond * 100)
+				fileCount(dir, 3+1, t)
+			})
+			t.Run("4 day later", func(t *testing.T) {
+				newFakeTime(24 * time.Hour)
+				n, err := r.Write(b2)
+				isNil(err, t)
+				equals(len(b2), n, t)
+				existsWithContent(filename, b2, t)
+				// we need to wait a little bit since the files get deleted on a different
+				// goroutine.
+				<-time.After(time.Millisecond * 100)
+				fileCount(dir, 3+1, t)
+			})
+		})
+	})
+
+}
+
+func TestTimeRotateHoures(t *testing.T) {
+	currentTime = fakeTime
+	b := []byte("boo!")
+	b2 := []byte("foooooo!")
+
+	// 不同的切割长度
+	for rotateTime := 1; rotateTime < 24; rotateTime++ {
+		// 不同的开始时间点
+		for clock := 0; clock < 24; clock++ {
+			fakeCurrentTime = time.Date(2022, 10, 1, clock, 0, 0, 0, time.Local)
+			(func(rotateTime int, clock int) {
+				dir := makeTempDir("TestDateRotate", t)
+				defer os.RemoveAll(dir)
+				keepMaxDay := 2
+				filename := logFile(dir)
+				r, err := NewRoller(filename, &Options{
+					MaxAge:     time.Duration(keepMaxDay*24) * time.Hour, // keep 2 days
+					RotateType: RotateHourly,
+					RotateTime: uint(rotateTime),
+					LocalTime:  true,
+				})
+				isNil(err, t)
+				defer r.Close()
+				n, err := r.Write(b)
+				isNil(err, t)
+				equals(len(b), n, t)
+				existsWithContent(filename, b, t)
+				fileCount(dir, 1, t)
+
+				for passHour := 1; passHour < 24; passHour++ {
+					// 模拟过去1小时的时间
+					newFakeTime(time.Hour)
+					n, err := r.Write(b2)
+					isNil(err, t)
+					equals(len(b2), n, t)
+
+					nextClock := clock + passHour
+					// 默认已经存在一个文件了
+					ext := 1
+					// 如果测试的时间超过1天，那么在当天0点需要进行一次切割
+					if nextClock >= 24 {
+						ext = (nextClock-24)/rotateTime + 1 + ext
+						nextClock = 24
+						// 如果时间间隔刚好被24整除，那么需要减去1，因为在计算新文件newFileCount产生的时候，24点的文件也会被计算进去了
+						if nextClock%rotateTime == 0 {
+							ext = ext - 1
+						}
+					}
+					// 下一次切割的时间
+					spiltTime := ((clock / rotateTime) + 1) * rotateTime
+					newFileCount := 0
+					if nextClock >= spiltTime {
+						newFileCount = (nextClock-spiltTime)/rotateTime + 1
+					}
+					fileCount(dir, newFileCount+ext, t)
+				}
+			})(rotateTime, clock)
+		}
+	}
+
+}
+
 func TestFirstWriteRotate(t *testing.T) {
 	currentTime = fakeTime
 
@@ -157,7 +290,7 @@ func TestFirstWriteRotate(t *testing.T) {
 	err := ioutil.WriteFile(filename, start, 0600)
 	isNil(err, t)
 
-	r, err := NewRoller(filename, 10, nil)
+	r, err := NewRoller(filename, &Options{MaxSize: 10})
 	isNil(err, t)
 
 	defer r.Close()
@@ -183,7 +316,7 @@ func TestMaxBackups(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	filename := logFile(dir)
-	r, err := NewRoller(filename, 10, &Options{MaxBackups: 1})
+	r, err := NewRoller(filename, &Options{MaxBackups: 1, MaxSize: 10})
 	isNil(err, t)
 
 	defer r.Close()
@@ -332,7 +465,7 @@ func TestCleanupExistingBackups(t *testing.T) {
 	err = ioutil.WriteFile(filename, data, 0644)
 	isNil(err, t)
 
-	l, err := NewRoller(filename, 10, &Options{MaxBackups: 1})
+	l, err := NewRoller(filename, &Options{MaxBackups: 1, MaxSize: 10})
 	isNil(err, t)
 	defer l.Close()
 
@@ -358,7 +491,7 @@ func TestMaxAge(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	filename := logFile(dir)
-	l, err := NewRoller(filename, 10, &Options{MaxAge: 24 * time.Hour})
+	l, err := NewRoller(filename, &Options{MaxAge: 24 * time.Hour, MaxSize: 10})
 	isNil(err, t)
 	defer l.Close()
 	b := []byte("boo!")
@@ -420,7 +553,7 @@ func TestOldLogFiles(t *testing.T) {
 
 	filename := logFile(dir)
 	data := []byte("data")
-	err := ioutil.WriteFile(filename, data, 07)
+	err := ioutil.WriteFile(filename, data, 0700)
 	isNil(err, t)
 
 	// This gives us a time with the same precision as the time we get from the
@@ -429,7 +562,7 @@ func TestOldLogFiles(t *testing.T) {
 	isNil(err, t)
 
 	backup := backupFile(dir)
-	err = ioutil.WriteFile(backup, data, 07)
+	err = ioutil.WriteFile(backup, data, 0700)
 	isNil(err, t)
 
 	newFakeTime()
@@ -438,10 +571,10 @@ func TestOldLogFiles(t *testing.T) {
 	isNil(err, t)
 
 	backup2 := backupFile(dir)
-	err = ioutil.WriteFile(backup2, data, 07)
+	err = ioutil.WriteFile(backup2, data, 0700)
 	isNil(err, t)
 
-	l, err := NewRoller(filename, 100, nil)
+	l, err := NewRoller(filename, &Options{MaxSize: 100})
 	isNil(err, t)
 	files, err := l.oldLogFiles()
 	isNil(err, t)
@@ -461,9 +594,9 @@ func TestTimeFromName(t *testing.T) {
 		want     time.Time
 		wantErr  bool
 	}{
-		{"foo-2014-05-04T14-44-33.555.log", time.Date(2014, 5, 4, 14, 44, 33, 555000000, time.UTC), false},
-		{"foo-2014-05-04T14-44-33.555", time.Time{}, true},
-		{"2014-05-04T14-44-33.555.log", time.Time{}, true},
+		{"foo-20140504144433.log", time.Date(2014, 5, 4, 14, 44, 33, 0, time.UTC), false},
+		{"foo-20140504144433", time.Time{}, true},
+		{"20140504144433.log", time.Time{}, true},
 		{"foo.log", time.Time{}, true},
 	}
 
@@ -480,7 +613,7 @@ func TestLocalTime(t *testing.T) {
 	dir := makeTempDir("TestLocalTime", t)
 	defer os.RemoveAll(dir)
 
-	l, err := NewRoller(logFile(dir), 10, &Options{LocalTime: true})
+	l, err := NewRoller(logFile(dir), &Options{LocalTime: true, MaxSize: 10})
 	isNil(err, t)
 	defer l.Close()
 	b := []byte("boo!")
@@ -504,7 +637,7 @@ func TestRotate(t *testing.T) {
 
 	filename := logFile(dir)
 
-	l, err := NewRoller(logFile(dir), 100, &Options{MaxBackups: 1})
+	l, err := NewRoller(logFile(dir), &Options{MaxBackups: 1, MaxSize: 100})
 	isNil(err, t)
 	defer l.Close()
 	b := []byte("boo!")
@@ -559,7 +692,7 @@ func TestCompressOnRotate(t *testing.T) {
 
 	filename := logFile(dir)
 
-	l, err := NewRoller(filename, 10, &Options{Compress: true})
+	l, err := NewRoller(filename, &Options{Compress: true, MaxSize: 10})
 	isNil(err, t)
 	defer l.Close()
 	b := []byte("boo!")
@@ -614,7 +747,7 @@ func TestCompressOnResume(t *testing.T) {
 	err = ioutil.WriteFile(filename2+compressSuffix, []byte{}, 0644)
 	isNil(err, t)
 
-	l, err := NewRoller(filename, 10, &Options{Compress: true})
+	l, err := NewRoller(filename, &Options{Compress: true, MaxSize: 10})
 	isNil(err, t)
 	defer l.Close()
 
@@ -673,7 +806,10 @@ func logFile(dir string) string {
 	return filepath.Join(dir, "foobar.log")
 }
 
-func backupFile(dir string) string {
+func backupFile(dir string, isLocal ...bool) string {
+	if len(isLocal) > 0 && isLocal[0] {
+		return filepath.Join(dir, "foobar-"+fakeTime().Format(backupTimeFormat)+".log")
+	}
 	return filepath.Join(dir, "foobar-"+fakeTime().UTC().Format(backupTimeFormat)+".log")
 }
 
@@ -691,8 +827,12 @@ func fileCount(dir string, exp int, t testing.TB) {
 }
 
 // newFakeTime sets the fake "current time" to two days later.
-func newFakeTime() {
-	fakeCurrentTime = fakeCurrentTime.Add(time.Hour * 24 * 2)
+func newFakeTime(d ...time.Duration) {
+	if len(d) == 0 {
+		fakeCurrentTime = fakeCurrentTime.Add(time.Hour * 24 * 2)
+	} else {
+		fakeCurrentTime = fakeCurrentTime.Add(d[0])
+	}
 }
 
 func notExist(path string, t testing.TB) {

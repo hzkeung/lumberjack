@@ -1,16 +1,19 @@
-# lumberjack  [![GoDoc](https://godoc.org/gopkg.in/natefinch/lumberjack.v2?status.png)](https://godoc.org/gopkg.in/natefinch/lumberjack.v2) [![Build Status](https://travis-ci.org/natefinch/lumberjack.svg?branch=v2.0)](https://travis-ci.org/natefinch/lumberjack) [![Build status](https://ci.appveyor.com/api/projects/status/00gchpxtg4gkrt5d)](https://ci.appveyor.com/project/natefinch/lumberjack) [![Coverage Status](https://coveralls.io/repos/natefinch/lumberjack/badge.svg?branch=v2.0)](https://coveralls.io/r/natefinch/lumberjack?branch=v2.0)
+# lumberjack
+
+Fork from "https://github.com/natefinch/lumberjack"
+
+New Features:
+
+- support rotate by date or houre
+
+## use
+
+```go
+import "gopkg.in/huyighuan/lumberjack.v4"
+```
 
 ### Lumberjack is a Go package for writing logs to rolling files.
 
-Package lumberjack provides a rolling logger.
-
-Note that this is v2.0 of lumberjack, and should be imported using gopkg.in
-thusly:
-
-    import "gopkg.in/natefinch/lumberjack.v2"
-
-The package name remains simply lumberjack, and the code resides at
-https://github.com/natefinch/lumberjack under the v2.0 branch.
 
 Lumberjack is intended to be one part of a logging infrastructure.
 It is not an all-in-one solution, but instead is a pluggable
@@ -25,7 +28,7 @@ Using the same lumberjack configuration from multiple processes on the same
 machine will result in improper behavior.
 
 
-**Example**
+**Example Rotate By Size**
 
 To use lumberjack with the standard library's log package, just pass it into the SetOutput function when your application starts.
 
@@ -42,42 +45,72 @@ log.SetOutput(&lumberjack.Logger{
 ```
 
 
+**Example Rotate By Date **
 
-## type Logger
+Code:
+
+```go
+log.SetOutput(&lumberjack.Logger{
+    Filename:   "/var/log/myapp/foo.log",
+    MaxAge:     28, //days
+    RotateType: RotateDaily, //optioanl, RotateHourly or RotateDaily, If not set, use rotate by size
+	RotateTime: 1, // optional, default 1
+})
+```
+
+**Example Rotate By Houre **
+
+Code:
+
+```go
+log.SetOutput(&lumberjack.Logger{
+    Filename:   "/var/log/myapp/foo.log",
+    MaxAge:     28, //days
+    RotateType: RotateHourly, //optioanl, RotateHourly or RotateDaily, If not set, use rotate by size
+	RotateTime: 5, // optional, default 1
+})
+```
+
+
+## type Option
+
 ``` go
-type Logger struct {
-    // Filename is the file to write logs to.  Backup log files will be retained
-    // in the same directory.  It uses <processname>-lumberjack.log in
-    // os.TempDir() if empty.
-    Filename string `json:"filename" yaml:"filename"`
+type Options struct {
 
-    // MaxSize is the maximum size in megabytes of the log file before it gets
-    // rotated. It defaults to 100 megabytes.
-    MaxSize int `json:"maxsize" yaml:"maxsize"`
+    // MaxSize is the maximum size in megabytes of the log file before it gets rotated. It defaults to 100 megabytes.
+    // optional, only used when RotateType is RotateSize or not set
+	MaxSize int64 `json:"maxsize" yaml:"maxsize"`
+	// MaxAge is the maximum time to retain old log files based on the timestamp
+	// encoded in their filename. The default is not to remove old log files
+	// based on age.
+	MaxAge time.Duration `json:"maxage" yaml:"maxage"`
 
-    // MaxAge is the maximum number of days to retain old log files based on the
-    // timestamp encoded in their filename.  Note that a day is defined as 24
-    // hours and may not exactly correspond to calendar days due to daylight
-    // savings, leap seconds, etc. The default is not to remove old log files
-    // based on age.
-    MaxAge int `json:"maxage" yaml:"maxage"`
+	// MaxBackups is the maximum number of old log files to retain. The default
+	// is to retain all old log files (though MaxAge may still cause them to get
+	// deleted.)
+	MaxBackups int `json:"maxbackups" yaml:"maxbackups"`
 
-    // MaxBackups is the maximum number of old log files to retain.  The default
-    // is to retain all old log files (though MaxAge may still cause them to get
-    // deleted.)
-    MaxBackups int `json:"maxbackups" yaml:"maxbackups"`
+	// LocalTime determines if the time used for formatting the timestamps in
+	// backup files is the computer's local time. The default is to use UTC
+	// time.
+	LocalTime bool `json:"localtime" yaml:"localtime"`
 
-    // LocalTime determines if the time used for formatting the timestamps in
-    // backup files is the computer's local time.  The default is to use UTC
-    // time.
-    LocalTime bool `json:"localtime" yaml:"localtime"`
+	// Compress determines if the rotated log files should be compressed
+	// using gzip. The default is not to perform compression.
+	Compress bool `json:"compress" yaml:"compress"`
 
-    // Compress determines if the rotated log files should be compressed
-    // using gzip. The default is not to perform compression.
-    Compress bool `json:"compress" yaml:"compress"`
-    // contains filtered or unexported fields
+    // RotateType: optional:  RotateHourly, RotateDaily, RotateSize, default RotateSize
+	RotateType RotateType `json:"rotate_type" yaml:"rotate_type"`
+	// if RotateType is RotateHourly, need make 24/RotateTime > 0
+	// if RotateType is not empty, default RotateTime is 1
+	// Example: RotateType is RotateHourly, RotateTime is 5, means rotate log file every 5 hours, rotate at 00:00 05:00 10:00 15:00 20:00 25:00
+	//  RotateType is RotateDaily, RotateTime is 2, means rotate log file every 2 days,
+	// rotate at xxxx-xx-01 00:00,  xxxx-xx-03 00:00
+	// or rotate at xxxx-xx-02 00:00,  xxxx-xx-04 00:00
+	RotateTime uint `json:"rotate_time" yaml:"rotate_time"`
 }
 ```
+
 Logger is an io.WriteCloser that writes to the specified filename.
 
 Logger opens or creates the logfile on first Write.  If the file exists and
@@ -95,10 +128,10 @@ file.
 Backups use the log file name given to Logger, in the form `name-timestamp.ext`
 where name is the filename without the extension, timestamp is the time at which
 the log was rotated formatted with the time.Time format of
-`2006-01-02T15-04-05.000` and the extension is the original extension.  For
+`20060102150405` and the extension is the original extension.  For
 example, if your Logger.Filename is `/var/log/foo/server.log`, a backup created
 at 6:30pm on Nov 11 2016 would use the filename
-`/var/log/foo/server-2016-11-04T18-30-00.000.log`
+`/var/log/foo/server-20060102150405.log`
 
 ### Cleaning Up Old Log Files
 Whenever a new logfile gets created, old log files may be deleted.  The most

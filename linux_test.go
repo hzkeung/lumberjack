@@ -22,7 +22,7 @@ func TestMaintainMode(t *testing.T) {
 	isNil(err, t)
 	f.Close()
 
-	l, err := NewRoller(filename, 100*1024*1024, &Options{MaxBackups: 1})
+	l, err := NewRoller(filename, &Options{MaxBackups: 1, MaxSize: 100 * 1024 * 1024})
 	isNil(err, t)
 	defer l.Close()
 	b := []byte("boo!")
@@ -62,7 +62,7 @@ func TestMaintainOwner(t *testing.T) {
 	isNil(err, t)
 	f.Close()
 
-	l, err := NewRoller(filename, 100*1024*1024, &Options{MaxBackups: 1})
+	l, err := NewRoller(filename, &Options{MaxBackups: 1, MaxSize: 100 * 1024 * 1024})
 	isNil(err, t)
 	defer l.Close()
 	b := []byte("boo!")
@@ -92,7 +92,7 @@ func TestCompressMaintainMode(t *testing.T) {
 	isNil(err, t)
 	f.Close()
 
-	l, err := NewRoller(filename, 100*1024*1024, &Options{MaxBackups: 1, Compress: true})
+	l, err := NewRoller(filename, &Options{MaxBackups: 1, Compress: true, MaxSize: 100 * 1024 * 1024})
 	isNil(err, t)
 	defer l.Close()
 	b := []byte("boo!")
@@ -138,7 +138,7 @@ func TestCompressMaintainOwner(t *testing.T) {
 	isNil(err, t)
 	f.Close()
 
-	l, err := NewRoller(filename, 100*1024*1024, &Options{MaxBackups: 1, Compress: true})
+	l, err := NewRoller(filename, &Options{MaxBackups: 1, Compress: true, MaxSize: 100 * 1024 * 1024})
 	isNil(err, t)
 	defer l.Close()
 	b := []byte("boo!")

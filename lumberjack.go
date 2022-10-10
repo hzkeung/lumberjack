@@ -32,10 +32,23 @@ import (
 )
 
 const (
-	backupTimeFormat = "2006-01-02T15-04-05.000"
+	backupTimeFormat = "20060102150405"
 	compressSuffix   = ".gz"
-	defaultMaxSize   = 100
+	defaultMaxSize   = 100 * 1024 * 1024
 )
+
+type RotateType string
+
+var (
+	RotateDateNotNeed RotateType = ""
+	RotateDaily       RotateType = "daily"
+	RotateHourly      RotateType = "hourly"
+	RotateSize        RotateType = "size"
+)
+
+func IsLegalRotateType(t RotateType) bool {
+	return t == RotateDateNotNeed || t == RotateDaily || t == RotateHourly || t == RotateSize
+}
 
 type constError string
 
@@ -49,24 +62,37 @@ const ErrWriteTooLong = constError("write exceeds max file length")
 
 // Options represents optional behavior you can specify for a new Roller.
 type Options struct {
+	// MaxSize is the maximum size in megabytes of the log file before it gets rotated. It defaults to 100 megabytes.
+	// optional, only used when RotateType is RotateSize or not set
+	MaxSize int64 `json:"maxsize" yaml:"maxsize"`
 	// MaxAge is the maximum time to retain old log files based on the timestamp
 	// encoded in their filename. The default is not to remove old log files
 	// based on age.
-	MaxAge time.Duration
+	MaxAge time.Duration `json:"maxage" yaml:"maxage"`
 
 	// MaxBackups is the maximum number of old log files to retain. The default
 	// is to retain all old log files (though MaxAge may still cause them to get
 	// deleted.)
-	MaxBackups int
+	MaxBackups int `json:"maxbackups" yaml:"maxbackups"`
 
 	// LocalTime determines if the time used for formatting the timestamps in
 	// backup files is the computer's local time. The default is to use UTC
 	// time.
-	LocalTime bool
+	LocalTime bool `json:"localtime" yaml:"localtime"`
 
 	// Compress determines if the rotated log files should be compressed
 	// using gzip. The default is not to perform compression.
-	Compress bool
+	Compress bool `json:"compress" yaml:"compress"`
+
+	// RotateType: optional:  RotateHourly, RotateDaily, RotateSize, default RotateSize
+	RotateType RotateType `json:"rotate_type" yaml:"rotate_type"`
+	// if RotateType is RotateHourly, need make 24/RotateTime > 0
+	// if RotateType is not empty, default RotateTime is 1
+	// Example: RotateType is RotateHourly, RotateTime is 5, means rotate log file every 5 hours, rotate at 00:00 05:00 10:00 15:00 20:00 25:00
+	//  RotateType is RotateDaily, RotateTime is 2, means rotate log file every 2 days,
+	// rotate at xxxx-xx-01 00:00,  xxxx-xx-03 00:00
+	// or rotate at xxxx-xx-02 00:00,  xxxx-xx-04 00:00
+	RotateTime uint `json:"rotate_time" yaml:"rotate_time"`
 }
 
 // NewRoller returns a new Roller.
@@ -80,22 +106,38 @@ type Options struct {
 //
 // An error is returned if a file cannot be opened or created, or if maxsize is
 // 0 or less.
-func NewRoller(filename string, maxSize int64, opt *Options) (*Roller, error) {
-	if maxSize <= 0 {
-		return nil, errors.New("max size cannot be 0")
-	}
+func NewRoller(filename string, opt *Options) (*Roller, error) {
 	if filename == "" {
 		return nil, errors.New("filename cannot be empty")
 	}
 	r := &Roller{
-		filename: filename,
-		maxSize:  maxSize,
+		filename:            filename,
+		maxSize:             0,
+		disableRotateByTime: true,
 	}
 	if opt != nil {
 		r.maxAge = opt.MaxAge
 		r.maxBackups = opt.MaxBackups
 		r.localTime = opt.LocalTime
 		r.compress = opt.Compress
+		r.maxSize = opt.MaxSize
+		if !IsLegalRotateType(opt.RotateType) {
+			return nil, errors.New("rotate type is illegal")
+		}
+		r.disableRotateByTime = (opt.RotateType == RotateDateNotNeed || opt.RotateType == RotateSize)
+		if !r.disableRotateByTime {
+			if opt.RotateTime == 0 {
+				opt.RotateTime = 1
+			}
+			if opt.RotateType == RotateHourly && 24/opt.RotateTime <= 0 {
+				return nil, errors.New("RotateTime must be a divisor of 24")
+			}
+		}
+		r.rotateType = opt.RotateType
+		r.rotateTime = opt.RotateTime
+	}
+	if r.disableRotateByTime && r.maxSize <= 0 {
+		r.maxSize = defaultMaxSize
 	}
 	err := r.openExistingOrNew(0)
 	if err != nil {
@@ -119,7 +161,7 @@ func NewRoller(filename string, maxSize int64, opt *Options) (*Roller, error) {
 // `/var/log/foo/server.log`, a backup created at 6:30pm on Nov 11 2016 would
 // use the filename `/var/log/foo/server-2016-11-04T18-30-00.000.log`
 //
-// Cleaning Up Old Log Files
+// # Cleaning Up Old Log Files
 //
 // Whenever a new logfile gets created, old log files may be deleted. The most
 // recent files according to the encoded timestamp will be retained, up to a
@@ -158,12 +200,20 @@ type Roller struct {
 	// using gzip. The default is not to perform compression.
 	compress bool
 
+	rotateType RotateType
+	// if RotateType is RotateHourly, need make (24%RotateTime==0 && 24/RotateTime > 0)
+	rotateTime          uint
+	disableRotateByTime bool
+
 	size int64
 	file *os.File
 	mu   sync.Mutex
 
 	millCh    chan bool
 	startMill sync.Once
+
+	createdTimestamp int64
+	remainSeconds    int64
 }
 
 var (
@@ -180,7 +230,7 @@ var (
 // If the length of the write is greater than MaxSize, an error is returned.
 func (r *Roller) Write(p []byte) (n int, err error) {
 	writeLen := int64(len(p))
-	if writeLen > r.maxSize {
+	if r.disableRotateByTime && writeLen > r.maxSize {
 		return 0, fmt.Errorf(
 			"write length %d, max size %d: %w", writeLen, r.maxSize, ErrWriteTooLong,
 		)
@@ -188,8 +238,14 @@ func (r *Roller) Write(p []byte) (n int, err error) {
 
 	defer r.mu.Unlock()
 	r.mu.Lock()
-
-	if r.size+writeLen > r.maxSize {
+	// 时间切割优先
+	if r.disableRotateByTime {
+		if r.size+writeLen > r.maxSize {
+			if err := r.rotate(); err != nil {
+				return 0, err
+			}
+		}
+	} else if r.needRotateByDate() {
 		if err := r.rotate(); err != nil {
 			return 0, err
 		}
@@ -258,7 +314,11 @@ func (r *Roller) openNew() error {
 		// Copy the mode off the old logfile.
 		mode = info.Mode()
 		// move the existing file
-		newname := backupName(name, r.localTime)
+		dateStr := currentTime().Format(backupTimeFormat)
+		if !r.localTime {
+			dateStr = currentTime().UTC().Format(backupTimeFormat)
+		}
+		newname := backupName(name, dateStr)
 		if err := os.Rename(name, newname); err != nil {
 			return fmt.Errorf("can't rename log file: %w", err)
 		}
@@ -278,23 +338,18 @@ func (r *Roller) openNew() error {
 	}
 	r.file = f
 	r.size = 0
+	r.calRotateCycle()
 	return nil
 }
 
 // backupName creates a new filename from the given name, inserting a timestamp
 // between the filename and the extension, using the local time if requested
 // (otherwise UTC).
-func backupName(name string, local bool) string {
+func backupName(name string, timestamp string) string {
 	dir := filepath.Dir(name)
 	filename := filepath.Base(name)
 	ext := filepath.Ext(filename)
 	prefix := filename[:len(filename)-len(ext)]
-	t := currentTime()
-	if !local {
-		t = t.UTC()
-	}
-
-	timestamp := t.Format(backupTimeFormat)
 	return filepath.Join(dir, fmt.Sprintf("%s-%s%s", prefix, timestamp, ext))
 }
 
@@ -325,6 +380,7 @@ func (r *Roller) openExistingOrNew(writeLen int64) error {
 	}
 	r.file = file
 	r.size = info.Size()
+	r.calRotateCycle()
 	return nil
 }
 
@@ -492,6 +548,66 @@ func (r *Roller) prefixAndExt() (prefix, ext string) {
 	ext = filepath.Ext(filename)
 	prefix = filename[:len(filename)-len(ext)] + "-"
 	return prefix, ext
+}
+
+func (r *Roller) calRotateCycle() {
+	if r.disableRotateByTime {
+		return
+	}
+	n := currentTime()
+	r.createdTimestamp = n.Unix()
+	r.remainSeconds = calRemainderSecondToNextRotateTime(n, r.rotateType, int(r.rotateTime), r.localTime)
+}
+
+func (r *Roller) needRotateByDate() bool {
+	if r.disableRotateByTime {
+		return false
+	}
+	return currentTime().Unix()-r.createdTimestamp >= r.remainSeconds
+}
+
+// 根据当前时间，周期单位 ，周期数量 计算举例下个周期剩余的秒数
+func calRemainderSecondToNextRotateTime(now time.Time, rotateType RotateType, rotateTime int, isLocal bool) int64 {
+	local := time.Local
+	if !isLocal {
+		local = time.UTC
+	}
+	// 以天为周期
+	if rotateType == RotateDaily {
+		rotateDate := now.Add(time.Hour * time.Duration(int64(rotateTime)*24))
+		y, m, d := rotateDate.Date()
+		if !isLocal {
+			y, m, d = rotateDate.UTC().Date()
+		}
+		// 重置为0点
+		zeroClock := time.Date(y, m, d, 0, 0, 0, 0, local)
+		return zeroClock.Unix() - now.Unix()
+	}
+	// 以小时为周期
+	if rotateType == RotateHourly {
+		currentHour := now.Hour()
+		if !isLocal {
+			currentHour = now.UTC().Hour()
+		}
+		// 下一个切割时间点
+		nextRotateHour := ((currentHour / rotateTime) + 1) * rotateTime
+		// 如果下一个时间切割点大于24小时，那么第二天的0点就是下一个切割点
+		rotateDate := now
+		if nextRotateHour >= 24 {
+			rotateDate = rotateDate.Add(time.Hour * 24)
+			nextRotateHour = 0
+		}
+		y, m, d := rotateDate.Date()
+		// UTC
+		if !isLocal {
+			y, m, d = rotateDate.UTC().Date()
+		}
+		zeroClock := time.Date(y, m, d, nextRotateHour, 0, 0, 0, local)
+		return zeroClock.Unix() - now.Unix()
+
+	}
+	return 0
+
 }
 
 // compressLogFile compresses the given log file, removing the

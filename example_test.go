@@ -4,7 +4,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/natefinch/lumberjack/v3"
+	"gopkg.in/huyinghuan/lumberjack.v4"
 )
 
 // To use lumberjack with the standard library's log package, just pass it into
@@ -12,11 +12,11 @@ import (
 func Example() {
 	l, _ := lumberjack.NewRoller(
 		"/var/log/myapp/foo.log",
-		500*1024*1024, // 500 megabytes
 		&lumberjack.Options{
 			MaxBackups: 3,
 			MaxAge:     28 * time.Hour * 24, // 28 days
 			Compress:   true,
+			MaxSize:    500 * 1024 * 1024,
 		})
 	log.SetOutput(l)
 }
