@@ -112,7 +112,7 @@ func NewRoller(filename string, opt *Options) (*Roller, error) {
 	}
 	r := &Roller{
 		filename:            filename,
-		maxSize:             0,
+		maxSize:             defaultMaxSize,
 		disableRotateByTime: true,
 	}
 	if opt != nil {
@@ -136,7 +136,7 @@ func NewRoller(filename string, opt *Options) (*Roller, error) {
 		r.rotateType = opt.RotateType
 		r.rotateTime = opt.RotateTime
 	}
-	if r.disableRotateByTime && r.maxSize <= 0 {
+	if r.maxSize <= 0 {
 		r.maxSize = defaultMaxSize
 	}
 	err := r.openExistingOrNew(0)
@@ -367,11 +367,11 @@ func (r *Roller) openExistingOrNew(writeLen int64) error {
 	if err != nil {
 		return fmt.Errorf("error getting log file info: %w", err)
 	}
-
-	if info.Size()+writeLen >= r.maxSize {
-		return r.rotate()
+	if r.disableRotateByTime {
+		if info.Size()+writeLen >= r.maxSize {
+			return r.rotate()
+		}
 	}
-
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		// if we fail to open the old log file for some reason, just ignore
