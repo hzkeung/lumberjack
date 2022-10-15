@@ -37,19 +37,6 @@ const (
 	defaultMaxSize   = 100 * 1024 * 1024
 )
 
-type RotateType string
-
-var (
-	RotateDateNotNeed RotateType = ""
-	RotateDaily       RotateType = "daily"
-	RotateHourly      RotateType = "hourly"
-	RotateSize        RotateType = "size"
-)
-
-func IsLegalRotateType(t RotateType) bool {
-	return t == RotateDateNotNeed || t == RotateDaily || t == RotateHourly || t == RotateSize
-}
-
 type constError string
 
 func (c constError) Error() string {
@@ -61,39 +48,6 @@ func (c constError) Error() string {
 const ErrWriteTooLong = constError("write exceeds max file length")
 
 // Options represents optional behavior you can specify for a new Roller.
-type Options struct {
-	// MaxSize is the maximum size in megabytes of the log file before it gets rotated. It defaults to 100 megabytes.
-	// optional, only used when RotateType is RotateSize or not set
-	MaxSize int64 `json:"maxsize" yaml:"maxsize"`
-	// MaxAge is the maximum time to retain old log files based on the timestamp
-	// encoded in their filename. The default is not to remove old log files
-	// based on age.
-	MaxAge time.Duration `json:"maxage" yaml:"maxage"`
-
-	// MaxBackups is the maximum number of old log files to retain. The default
-	// is to retain all old log files (though MaxAge may still cause them to get
-	// deleted.)
-	MaxBackups int `json:"maxbackups" yaml:"maxbackups"`
-
-	// LocalTime determines if the time used for formatting the timestamps in
-	// backup files is the computer's local time. The default is to use UTC
-	// time.
-	LocalTime bool `json:"localtime" yaml:"localtime"`
-
-	// Compress determines if the rotated log files should be compressed
-	// using gzip. The default is not to perform compression.
-	Compress bool `json:"compress" yaml:"compress"`
-
-	// RotateType: optional:  RotateHourly, RotateDaily, RotateSize, default RotateSize
-	RotateType RotateType `json:"rotate_type" yaml:"rotate_type"`
-	// if RotateType is RotateHourly, need make 24/RotateTime > 0
-	// if RotateType is not empty, default RotateTime is 1
-	// Example: RotateType is RotateHourly, RotateTime is 5, means rotate log file every 5 hours, rotate at 00:00 05:00 10:00 15:00 20:00 25:00
-	//  RotateType is RotateDaily, RotateTime is 2, means rotate log file every 2 days,
-	// rotate at xxxx-xx-01 00:00,  xxxx-xx-03 00:00
-	// or rotate at xxxx-xx-02 00:00,  xxxx-xx-04 00:00
-	RotateTime uint `json:"rotate_time" yaml:"rotate_time"`
-}
 
 // NewRoller returns a new Roller.
 //
@@ -135,6 +89,7 @@ func NewRoller(filename string, opt *Options) (*Roller, error) {
 		}
 		r.rotateType = opt.RotateType
 		r.rotateTime = opt.RotateTime
+		r.Hook = opt.Hook
 	}
 	if r.maxSize <= 0 {
 		r.maxSize = defaultMaxSize
@@ -214,6 +169,8 @@ type Roller struct {
 
 	createdTimestamp int64
 	remainSeconds    int64
+
+	Hook *Hook
 }
 
 var (
@@ -322,7 +279,9 @@ func (r *Roller) openNew() error {
 		if err := os.Rename(name, newname); err != nil {
 			return fmt.Errorf("can't rename log file: %w", err)
 		}
-
+		if r.Hook != nil {
+			go r.Hook.AfterRotate(newname)
+		}
 		// this is a no-op anywhere but linux
 		if err := chown(name, info); err != nil {
 			return err

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -159,6 +160,11 @@ func TestTimeRotateDaily(t *testing.T) {
 			MaxAge:     time.Duration(keepMaxDay*24) * time.Hour, // keep 2 days
 			RotateType: RotateDaily,
 			LocalTime:  true,
+			Hook: &Hook{
+				AfterRotate: func(filepath string) {
+					log.Println("after rotate backup file: ", filepath)
+				},
+			},
 		})
 		isNil(err, t)
 		defer r.Close()
