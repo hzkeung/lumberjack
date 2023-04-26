@@ -86,6 +86,11 @@ func NewRoller(filename string, opt *Options) (*Roller, error) {
 			if opt.RotateType == RotateHourly && 24/opt.RotateTime <= 0 {
 				return nil, errors.New("RotateTime must be a divisor of 24")
 			}
+			if opt.RotateType == RotateDaily {
+				r.maxAge = 24 * time.Hour * opt.MaxAge
+			} else if opt.RotateType == RotateHourly {
+				r.maxAge = 1 * time.Hour * opt.MaxAge
+			}
 		}
 		r.rotateType = opt.RotateType
 		r.rotateTime = opt.RotateTime
@@ -157,7 +162,7 @@ type Roller struct {
 
 	rotateType RotateType
 	// if RotateType is RotateHourly, need make (24%RotateTime==0 && 24/RotateTime > 0)
-	rotateTime          uint
+	rotateTime          uint // unit depends on RotateType
 	disableRotateByTime bool
 
 	size int64
