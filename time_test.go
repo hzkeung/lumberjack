@@ -2,6 +2,7 @@ package lumberjack
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"testing"
 	"time"
@@ -92,6 +93,30 @@ func TestCalRemainSeconds(t *testing.T) {
 		}
 
 	})
+	t.Run("minute", func(t *testing.T) {
+		// i current hour
+		// j 间隔小时
+		for j := 1; j < 31; j++ {
+
+			rotateInterval := getIntervalTime(RotateMinute, j)
+			log.Println(rotateInterval, "=============================")
+			for i := 0; i < 60; i++ {
+				minute := strconv.Itoa(i)
+				if i < 10 {
+					minute = "0" + minute
+				}
+				n, _ := time.ParseInLocation("2006-01-02 15:04:05", fmt.Sprintf("2018-01-01 23:%s:00", minute), time.Local)
+				s := calRemainderSecondToNextRotateTime(n, RotateMinute, j, true)
+				nextMinute := ((i / j) + 1) * j
+				if nextMinute > 60 {
+					nextMinute = 60
+				}
+				fmt.Printf("minute:%s, interval:%d, next:%d, s:%d\n", minute, j, nextMinute, s)
+			}
+		}
+
+	})
+
 }
 func TestCalRemainSecondsUTC(t *testing.T) {
 	isLocal := false

@@ -6,6 +6,7 @@ var (
 	RotateDateNotNeed RotateType = ""
 	RotateDaily       RotateType = "daily"
 	RotateHourly      RotateType = "hourly"
+	RotateMinute      RotateType = "minute"
 	RotateSize        RotateType = "size"
 )
 

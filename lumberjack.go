@@ -47,6 +47,26 @@ func (c constError) Error() string {
 // size allowed in a single file.
 const ErrWriteTooLong = constError("write exceeds max file length")
 
+func getIntervalTime(rotateType RotateType, rotateTime int) []int {
+	var intervalTime []int = []int{}
+	if rotateTime == 0 {
+		return intervalTime
+	}
+	switch rotateType {
+	case RotateMinute:
+		for i := rotateTime; i < 60; i += rotateTime {
+			intervalTime = append(intervalTime, i)
+		}
+		return intervalTime
+	case RotateHourly:
+		for i := rotateTime; i < 24-rotateTime; i += rotateTime {
+			intervalTime = append(intervalTime, i)
+		}
+		return intervalTime
+	}
+	return intervalTime
+}
+
 // Options represents optional behavior you can specify for a new Roller.
 
 // NewRoller returns a new Roller.
@@ -89,7 +109,9 @@ func NewRoller(filename string, opt *Options) (*Roller, error) {
 			if opt.RotateType == RotateDaily {
 				r.maxAge = 24 * time.Hour * opt.MaxAge
 			} else if opt.RotateType == RotateHourly {
-				r.maxAge = 1 * time.Hour * opt.MaxAge
+				r.maxAge = time.Hour * opt.MaxAge
+			} else if opt.RotateType == RotateMinute {
+				r.maxAge = time.Minute * opt.MaxAge
 			}
 		}
 		r.rotateType = opt.RotateType
@@ -568,7 +590,38 @@ func calRemainderSecondToNextRotateTime(now time.Time, rotateType RotateType, ro
 		}
 		zeroClock := time.Date(y, m, d, nextRotateHour, 0, 0, 0, local)
 		return zeroClock.Unix() - now.Unix()
+	}
 
+	// 以分钟为周期
+	if rotateType == RotateMinute {
+		rotateInterval := getIntervalTime(RotateMinute, rotateTime)
+		currentMinute := now.Minute()
+		if !isLocal {
+			currentMinute = now.UTC().Minute()
+		}
+		var nextMinute int
+		for _, point := range rotateInterval {
+			if currentMinute < point {
+				nextMinute = point
+				break
+			}
+		}
+		// 下一个切割时间点
+		rotateDate := now
+		// 如果没有配到任何切割点，那么下一个切割点就是下一个小时的0分
+		if nextMinute == 0 {
+			rotateDate = rotateDate.Add(time.Hour)
+			nextMinute = 0
+		}
+		y, m, d := rotateDate.Date()
+		h := rotateDate.Hour()
+		// // UTC
+		if !isLocal {
+			y, m, d = rotateDate.UTC().Date()
+			h = rotateDate.UTC().Hour()
+		}
+		zeroClock := time.Date(y, m, d, h, nextMinute, 0, 0, local)
+		return zeroClock.Unix() - now.Unix()
 	}
 	return 0
 
