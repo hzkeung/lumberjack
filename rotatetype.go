@@ -11,5 +11,5 @@ var (
 )
 
 func IsLegalRotateType(t RotateType) bool {
-	return t == RotateDateNotNeed || t == RotateDaily || t == RotateHourly || t == RotateSize
+	return t == RotateDateNotNeed || t == RotateDaily || t == RotateHourly || t == RotateSize || t == RotateMinute
 }
