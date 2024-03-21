@@ -4,7 +4,7 @@ import (
 	"log"
 	"time"
 
-	"gopkg.in/huyinghuan/lumberjack.v4"
+	"github.com/hzkeung/lumberjack/v4"
 )
 
 // To use lumberjack with the standard library's log package, just pass it into

@@ -292,7 +292,7 @@ func (r *Roller) openNew() error {
 	}
 
 	name := r.newFilename()
-	mode := os.FileMode(0600)
+	mode := os.FileMode(0644)
 	info, err := osStat(name)
 	if err == nil {
 		// Copy the mode off the old logfile.
@@ -301,6 +301,18 @@ func (r *Roller) openNew() error {
 		dateStr := currentTime().Format(backupTimeFormat)
 		if !r.localTime {
 			dateStr = currentTime().UTC().Format(backupTimeFormat)
+		}
+		if r.rotateType == "hourly" {
+			dateStr = currentTime().Add(-1 * time.Hour).Format("20060102-15")
+		}
+		if r.rotateType == "hourly" && !r.localTime {
+			dateStr = currentTime().Add(-1 * time.Hour).UTC().Format("20060102-15")
+		}
+		if r.rotateType == "daily" {
+			dateStr = currentTime().Add(-1 * time.Hour).Format("20060102")
+		}
+		if r.rotateType == "daily" && !r.localTime {
+			dateStr = currentTime().Add(-1 * time.Hour).UTC().Format("20060102")
 		}
 		newname := backupName(name, dateStr)
 		if err := os.Rename(name, newname); err != nil {

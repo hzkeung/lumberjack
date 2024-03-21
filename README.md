@@ -1,6 +1,6 @@
 # lumberjack
 
-Fork from "https://github.com/natefinch/lumberjack"
+Fork from "https://github.com/huyighuan/lumberjack"
 
 New Features:
 
@@ -9,7 +9,7 @@ New Features:
 ## use
 
 ```go
-import "gopkg.in/huyighuan/lumberjack.v4"
+import "github.com/hzkeung/lumberjack.v4"
 ```
 
 ### Lumberjack is a Go package for writing logs to rolling files.
@@ -55,10 +55,10 @@ Code:
 	l, _ := lumberjack.NewRoller(
 		"/var/log/myapp/foo.log",
 		&lumberjack.Options{
-		  	Filename:   "/var/log/myapp/foo.log",
 			MaxAge:     28, //days
 			RotateType: RotateDaily, //optioanl, RotateHourly or RotateDaily, If not set, use rotate by size
 			RotateTime: 1, // optional, default 1
+                        LocalTime: true,
 		})
 	log.SetOutput(l)
 ```
@@ -75,6 +75,7 @@ Code:
 			MaxAge:     28, //days
 			RotateType: RotateHourly, //optioanl, RotateHourly or RotateDaily, If not set, use rotate by size
 			RotateTime: 5, // optional, default 1
+                        LocalTime: true,
 		})
 	log.SetOutput(l)
 ```

@@ -1,3 +1,3 @@
-module gopkg.in/huyinghuan/lumberjack.v4
+module github.com/hzkeung/lumberjack/v4
 
 go 1.13
